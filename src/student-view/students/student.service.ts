@@ -11,6 +11,7 @@ import { FindOptions, Op, Transaction, WhereOptions } from "sequelize";
 import {
   EVENT_DAO,
   JOB_DAO,
+  MAX_RESUMES_PER_STUDENT,
   ON_CAMPUS_OFFER_DAO,
   REGISTRATIONS_DAO,
   RESUME_DAO,
@@ -37,7 +38,7 @@ import {
   UserModel,
 } from "src/db/models";
 import { FeedbackModel } from "src/db/models/FeedbackModel";
-import { CategoryEnum, DepartmentEnum, GenderEnum } from "src/enums";
+import { CategoryEnum, DepartmentEnum, GenderEnum, BacklogEnum } from "src/enums";
 import { JobRegistrationEnum } from "src/enums/jobRegistration.enum";
 import { SeasonStatusEnum } from "src/enums/SeasonStatus.enum";
 import { EventsQueryDto } from "src/event/dtos/query.dto";
@@ -63,6 +64,21 @@ export class StudentService {
     if (!student) throw new ForbiddenException(`Student with id ${studentId} not found`);
     const department: DepartmentEnum = student.program.department;
 
+    let backlogFilter: any = {};
+    if (student.backlog === BacklogEnum.ACTIVE) {
+      backlogFilter = {
+        isBacklogAllowed: BacklogEnum.ACTIVE,
+      };
+    } else if (student.backlog === BacklogEnum.PREVIOUS) {
+      backlogFilter = {
+        isBacklogAllowed: { [Op.in]: [BacklogEnum.PREVIOUS, BacklogEnum.ACTIVE] },
+      };
+    } else if (student.backlog === BacklogEnum.NEVER) {
+      backlogFilter = {
+        isBacklogAllowed: { [Op.in]: [BacklogEnum.NEVER, BacklogEnum.PREVIOUS, BacklogEnum.ACTIVE] },
+      };
+    }
+
     const where: WhereOptions<SalaryModel> = {
       programs: { [Op.or]: { [Op.contains]: [student.programId], [Op.is]: null, [Op.eq]: [] } },
       genders: { [Op.or]: { [Op.contains]: [student.gender as GenderEnum], [Op.is]: null, [Op.eq]: [] } },
@@ -71,6 +87,7 @@ export class StudentService {
       tenthMarks: { [Op.lte]: student.tenthMarks },
       twelthMarks: { [Op.lte]: student.twelthMarks },
       [Op.not]: { facultyApprovals: { [Op.contains]: [department] } },
+      ...backlogFilter,
     };
 
     return where;
@@ -439,9 +456,22 @@ export class StudentService {
   }
 
   async addResume(studentId: string, filepath: string, name: string, t: Transaction) {
+    // Check current resume count for the student
+    const currentResumeCount = await this.resumeRepo.count({
+      where: { studentId },
+      transaction: t,
+    });
+
+    // Enforce maximum resume limit
+    if (currentResumeCount >= MAX_RESUMES_PER_STUDENT) {
+      throw new BadRequestException(
+        `Cannot upload more than ${MAX_RESUMES_PER_STUDENT} resumes. Please delete some existing resumes before uploading new ones.`
+      );
+    }
+
     const ans = await this.resumeRepo.create({ studentId, filepath, name }, { transaction: t });
 
-    return ans.id;
+    return { status: "success", message: "Resume added successfully", resumeId: ans.id };
   }
 
   async deleteResumes(studentId: string, filepath: string | string[], t: Transaction) {
@@ -477,13 +507,11 @@ export class StudentService {
   }
 
   async registerSeason(studentId: string, seasonId: string) {
-    
     const student = await this.studentRepo.findByPk(studentId);
     if (!student) {
       throw new NotFoundException(`Student with id ${studentId} not found`);
     }
 
-    
     if (
       student.backlog === null ||
       student.backlog === undefined ||
@@ -510,13 +538,11 @@ export class StudentService {
   }
 
   async deregisterSeason(studentId: string, seasonId: string) {
-   
     const student = await this.studentRepo.findByPk(studentId);
     if (!student) {
       throw new NotFoundException(`Student with id ${studentId} not found`);
     }
 
-    
     if (
       student.backlog === null ||
       student.backlog === undefined ||
@@ -543,14 +569,12 @@ export class StudentService {
   }
 
   async updateOnboarding(studentId: string, updateData: OnboardingUpdateDto) {
-   
     const currentStudent = await this.studentRepo.findByPk(studentId);
 
     if (!currentStudent) {
       throw new NotFoundException(`Student with id ${studentId} not found`);
     }
 
-   
     const updates: any = {};
 
     if (updateData.backlog !== undefined) {
@@ -574,12 +598,10 @@ export class StudentService {
       updates.twelthMarks = updateData.twelthMarks;
     }
 
-   
     if (Object.keys(updates).length === 0) {
       return { message: "No updates to apply" };
     }
 
-    
     await this.studentRepo.update(updates, {
       where: { id: studentId },
     });
