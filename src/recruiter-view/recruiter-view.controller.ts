@@ -142,10 +142,6 @@ export class RecruiterViewController {
       throw new ForbiddenException("Invalid captcha");
     }
 
-    if (!jaf?.job?.recruiterDetailsFilled?.[0]?.email) {
-      throw new HttpException("Email is required", HttpStatus.BAD_REQUEST);
-    }
-
     const attachments = jaf.job.attachments || [];
     const uploadedFiles = [];
 
