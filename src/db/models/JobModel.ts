@@ -175,7 +175,7 @@ export class JobModel extends Model<JobModel> {
     type: sequelize.STRING,
     allowNull: true,
   })
-  location: string;
+  location?: string;
 
   @Column({
     type: sequelize.INTEGER,
